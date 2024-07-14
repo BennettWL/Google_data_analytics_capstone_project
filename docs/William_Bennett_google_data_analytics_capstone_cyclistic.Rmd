@@ -3,8 +3,8 @@ title: "google_data_analytics_case_study_cyclistic"
 author: "William Bennett"
 date: "`r Sys.Date()`"
 output:
-  word_document: default
   html_document: default
+  word_document: default
   pdf_document: default
 ---
 

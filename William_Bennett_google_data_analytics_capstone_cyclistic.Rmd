@@ -1,0 +1,405 @@
+---
+title: "google_data_analytics_case_study_cyclistic"
+author: "William Bennett"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+# context
+In 2016, Cyclistic launched a successful bike-share offering. 5,824 bicycles, 692 stations. Cyclistic’s marketing strategy relied on building general awareness and appealing to broad consumer segments. flexibility of its pricing plans: single-ride passes, full-day passes, and annual memberships. Customers who purchase single-ride or full-day passes are referred to as casual riders. Customers who purchase annual memberships are Cyclistic members. Cyclistic’s finance analysts have concluded that annual members are much more profitable than casual riders. Although the pricing flexibility helps Cyclistic attract more customers, Moreno(director of marketing) believes that maximizing the number of annual members will be key to future growth and there is an opportunity to convert casual riders into members. She notes that casual riders are already aware of the Cyclistic program and have chosen Cyclistic for their mobility needs. Moreno has set a clear goal: Design marketing strategies aimed at converting casual riders into annual members. In order to do that, however, the team needs to better understand how annual members and casual riders differ, why casual riders would buy a membership, and how digital media could affect their marketing tactics. Moreno and her team are interested in analysing the Cyclistic historical bike trip data to identify trends. 
+
+1. How do annual members and casual riders use Cyclistic bikes differently? 
+2. Why would casual riders buy Cyclistic annual memberships? 
+3. How can Cyclistic use digital media to influence casual riders to become members? 
+
+Moreno has assigned you the first question to answer: How do annual members and casual
+riders use Cyclistic bikes differently?
+
+```{r}
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+### packages
+```{r}
+install.packages("dplyr")
+install.packages("readr")
+install.packages("janitor")
+install.packages("lubridate")
+install.packages("ggplot2")
+install.packages("tidyr")
+install.packages("fmsb")
+
+library(dplyr)
+library(readr)
+library(janitor)
+library(lubridate)
+library(ggplot2)
+library(tidyr)
+library(fmsb)
+```
+
+# Data Cleaning
+```{r}
+#merge csvs into data frame 
+cyclistic_data_2023_origional <- list.files(path = "/Users/billybennett/google_data_analytics_capstone/cyclistic_data_2023",
+                                          pattern = "*.csv", full.names = TRUE) %>% 
+  lapply(read_csv) %>%
+  bind_rows
+```
+The above code merges the CSV files directly into one table.
+
+
+```{r}
+cyclistic_data_2023_unclean <- cyclistic_data_2023_origional
+```
+I then created an alternate version of the data set to be cleaned.
+
+
+```{r}
+print(cyclistic_data_2023_unclean)
+```
+viewing the data-set 
+
+
+```{r}
+cyclistic_data_2023_unclean <- cyclistic_data_2023_unclean %>% select(-start_lat)
+cyclistic_data_2023_unclean <- cyclistic_data_2023_unclean %>% select(-start_lng)
+cyclistic_data_2023_unclean <- cyclistic_data_2023_unclean %>% select(-end_lat)
+cyclistic_data_2023_unclean <- cyclistic_data_2023_unclean %>% select(-end_lng)
+cyclistic_data_2023_unclean <- cyclistic_data_2023_unclean %>% select(-start_station_id)
+cyclistic_data_2023_unclean <- cyclistic_data_2023_unclean %>% select(-end_station_id)
+```
+removal of columns that aren't needed for my analysis
+
+
+```{r}
+get_dupes(cyclistic_data_2023_unclean)
+
+# remove duplicates
+cyclistic_data_2023_unclean <- distinct(cyclistic_data_2023_unclean)
+```
+check for and then remove duplicate rows.
+
+
+
+```{r}
+sum(rowSums(is.na(cyclistic_data_2023_unclean)) > 0)
+
+# Check number of missing values per column
+sapply(cyclistic_data_2023_unclean, function(x) sum(is.na(x)))
+```
+check for missing values. I decided to not yet remove the rows containing missing values as they only appear in the station name columns, i will first finish cleaning the data and then split the clean data into two versions. The first being the completely cleaned data set minus the station names columns and the second being the cleaned data set minus the columns with missing rows.
+
+```{r}
+cyclistic_data_2023_unclean %>%
+  distinct(rideable_type)
+```
+check that only electric, docked and classic are the options
+
+```{r}
+cyclistic_data_2023_unclean %>%
+  distinct(member_casual)
+```
+check that only member or causal are options 
+
+
+# Data Manipulation
+
+
+```{r}
+cyclistic_data_2023_valid_dates <- cyclistic_data_2023_unclean %>%
+  mutate(valid_dates = if_else(started_at < ended_at, TRUE, FALSE))
+cyclistic_data_2023_valid_dates <- cyclistic_data_2023_valid_dates %>%
+  filter(valid_dates == TRUE)
+cyclistic_data_2023_clean <- cyclistic_data_2023_valid_dates %>% select(-valid_dates)
+```
+create valid dates column to check for incorrect data
+
+```{r}
+cyclistic_data_2023_clean$started_at <- as.POSIXct(cyclistic_data_2023_clean$started_at, format="%Y-%m-%d %H:%M:%S")
+cyclistic_data_2023_clean$ended_at <- as.POSIXct(cyclistic_data_2023_clean$ended_at, format="%Y-%m-%d %H:%M:%S")
+```
+converts the started at and ended at columns to date time
+
+
+```{r}
+cyclistic_data_2023_clean <- cyclistic_data_2023_clean %>%
+  mutate(ride_length = as.numeric(difftime(ended_at, started_at, units = "mins")))
+```
+create ride length column
+
+
+```{r}
+cyclistic_data_2023_clean <- cyclistic_data_2023_clean %>%
+  mutate(day_of_week = wday(started_at, label = TRUE, abbr = FALSE))
+head(cyclistic_data_2023_clean)
+```
+create day of week column
+
+```{r}
+cyclistic_data_2023_stations <- cyclistic_data_2023_clean %>% drop_na()
+```
+create a new table with only the rows with all station names 
+
+# Data Analysis
+
+## member and casual usuage per bike type 
+The first piece of analysis i have decided to do is looking at how members and casuals differ in their choice of bike type.
+```{r}
+head(cyclistic_data_2023_clean)
+
+cyclistic_data_2023_bike_type_table <- cyclistic_data_2023_clean %>%
+  group_by(rideable_type, member_casual) %>%
+  summarize(count = n())
+
+head(cyclistic_data_2023_bike_type_table)
+
+ggplot(data = cyclistic_data_2023_bike_type_table) + geom_col(mapping = aes(x = rideable_type, y = count, fill = member_casual), position = "dodge")+
+  labs(title = "Counts of Members and Casual Riders by Day of the Week",
+       x = "bike type",
+       y = "Count",
+       fill = "Member/Casual") +
+  theme_minimal()
+```
+as we can see here there are no instances of members using docked bikes. we can also see that casual riders are notably more likely to use an electric bike rather than a classic bike, where as whilst still leaning towards elcetric the distribution is more even among members. This may suggest that casuals have a slightly stronger preference for leisurely rides or perhaps cover longer distances. 
+
+## member and casual usage by date and time 
+I am now going to analyse how members and casuals use cyclistic differently depending on factors such as day of the week, month and time of day.
+
+### member and casual usage by day of week
+```{r}
+cyclistic_data_2023_day_of_week_table <- cyclistic_data_2023_clean %>%
+  group_by(day_of_week, member_casual) %>%
+  summarize(count = n())
+
+ggplot(data = cyclistic_data_2023_day_of_week_table) + geom_col(mapping = aes(x = day_of_week, y = count, fill = member_casual), position = "dodge")+
+  labs(title = "Counts of Members and Casual Riders by Day of the Week",
+       x = "Day of the Week",
+       y = "Count",
+       fill = "Member/Casual") +
+  theme_minimal()
+```
+as shown above we can see members are more likely to cycle on weekdays, where as casuals are more likely to cycle at weekends. This would suggest that casual riders are more likely to use the bikes for recreational purposes.
+
+### member and casual usage by hour of day
+```{r}
+cyclistic_data_2023_hour_of_day_column <- cyclistic_data_2023_clean %>%
+  mutate(hour_of_day = hour(cyclistic_data_2023_clean$started_at))
+
+cyclistic_data_2023_hour_of_day_table <- cyclistic_data_2023_hour_of_day_column %>%
+  group_by(hour_of_day, member_casual) %>%
+  summarize(count = n())
+
+ggplot(data = cyclistic_data_2023_hour_of_day_table) + 
+  geom_col(mapping = aes(x = hour_of_day, y = count, fill = member_casual), position = position_dodge()) +
+  labs(
+    title = "Counts of Members and Casual Riders by Hour of Day",
+    x = "Hour of Day",
+    y = "Count",
+    fill = "Member/Casual"
+  ) +
+  scale_x_continuous(breaks = seq(0, 23, by = 1)) +
+  theme_minimal() +
+  theme (
+  axis.text.x = element_text(angle = 0, hjust = 0, vjust = 0.5, size = 5))
+```
+as we can see here both member and casual usage peaks during late afternoon, however members are for more likely to cycle during the morning, when paired with the information from the previous graph we could infer that members are using cyclistic to cycle to and from work as the most likely journeys based on the information would be 7-8 am and 4-6pm Tuesday Wednesday Thursday. on the other hand casuals are most likely to be cycling 4-6pm at weekends and very unlikely to be cycling during week day mornings. 
+
+### member and casual usage across 2023
+```{r}
+cyclistic_data_2023_dates_column <- cyclistic_data_2023_clean %>%
+  mutate(dates = format(started_at, "%y %m %d"))
+
+cyclistic_data_2023_journey_date_table <- cyclistic_data_2023_dates_column %>%
+  group_by(dates, member_casual) %>%
+  summarize(count = n())
+
+head(cyclistic_data_2023_journey_date_table)
+
+ggplot(data = cyclistic_data_2023_journey_date_table) + 
+  geom_line(mapping = aes(x = dates, y = count, colour = member_casual, group = member_casual)) +
+  geom_smooth(mapping = aes(x = dates, y = count, colour = member_casual, group = member_casual), 
+              method = "loess", se = FALSE) +
+  labs(title = "Counts of Members and Casual Riders by Day of the Week",
+       x = "Date",
+       y = "Count",
+       fill = "Member/Casual") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10))
+
+``` 
+as we can see in the above graph across the year members and casuals seem to use cyclistic similarly throughout the year with both groups peaking during hotter months. Interestingly e can see that the highest peaks being from casual riders, we could use this to suggest that casuals are more encouraged to ride by external factors, where as members are somewhat more consistent.
+
+## member and casual usage by stations and routes 
+here i am going to asses if their are any key differences between the stations and routes that members and casual riders take. 
+
+### member and casual journeys by station
+```{r}
+cyclistic_data_2023_station_table <- cyclistic_data_2023_stations %>%
+  group_by(start_station_name, member_casual) %>%
+  summarize(count = n())
+
+cyclistic_data_2023_station_table <- cyclistic_data_2023_station_table %>%
+  filter(count > 15000)
+
+head(cyclistic_data_2023_station_table)
+
+ggplot(data = cyclistic_data_2023_station_table) + 
+  geom_point(mapping = aes(x = start_station_name, y = count, colour = member_casual)) +
+  labs(
+    title = "Counts of Members and Casual Riders by Station",
+    x = "Station Name",
+    y = "Count",
+    colour = "Member/Casual"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10)
+  )
+```
+as we can see above there are far more stations where members are taking over 15000 journeys from, this would suggest that members are more likely to cycle from the same station frequently, this may suggest that members use cyclistic for journeys they often make, such as to a place of work. also by looking at the names that appear for casual rider popular stations we can see theater on the lake, shedd aquarium and millennium park, this would again support that casuals use cyclistic for recreational purposes.
+
+### member and casual journeys based on route
+```{r}
+cyclistic_data_2023_routes <- cyclistic_data_2023_stations %>%
+  mutate(route = paste(cyclistic_data_2023_stations$start_station_name, cyclistic_data_2023_stations$end_station_name, sep = " to "))
+
+cyclistic_data_2023_routes_table <- cyclistic_data_2023_routes %>%
+  group_by(route, member_casual) %>%
+  summarize(count = n())
+
+cyclistic_data_2023_routes_table <- cyclistic_data_2023_routes_table %>%
+  filter(count > 3000)
+
+ggplot(data = cyclistic_data_2023_routes_table) + 
+  geom_point(mapping = aes(x = route, y = count, colour = member_casual)) +
+  labs(
+    title = "Counts of Members and Casual Riders by Route",
+    x = "Route taken",
+    y = "Count",
+    colour = "Member/Casual"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 4))
+```    
+when looking at this graph we can see among the routes frequently taken by casual riders we can see that many journeys begin and end at the same station, this would tell us that casual users are not using the bikes as a method of getting from one place to another, this would suggest to us that casuals are using the bikes for enjoyment rather than practicality. further more we can see that there is an outlier among the casual users, despite their being less casual rides taken overall the most used route by either group was from casual users. this would suggest that this casual riders are more likely to target specific routes where as members will use the bikes as and when needed.
+
+## member and casual ride length
+```{r}
+round_to_nearest_10 <- function(x) {
+  round(x / 10) * 10
+}
+cyclistic_data_2023_ride_length_rounded <- cyclistic_data_2023_clean %>%
+  mutate(ride_length_rounded = round_to_nearest_10(ride_length))
+
+cyclistic_data_2023_ride_length_table <- cyclistic_data_2023_ride_length_rounded %>%
+  group_by(ride_length_rounded, member_casual) %>%
+  summarize(count = n())
+
+head(cyclistic_data_2023_ride_length_table)
+
+cyclistic_data_2023_ride_length_table <- cyclistic_data_2023_ride_length_table %>%
+  filter(ride_length_rounded < 100)
+
+ggplot(data = cyclistic_data_2023_ride_length_table) + 
+  geom_col(mapping = aes(x = ride_length_rounded, y = count, fill = member_casual)) +
+  labs(
+    title = "Journeys under 100 minutes",
+    x = "date",
+    y = "journey time",
+    colour = "Member/Casual"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10)
+  )
+
+```
+as we can see here members take a far larger percentage of their journeys in under 50 minutes, however this graph doesn't demonstrate the number of journeys taken over longer periods of time well as the scale makes it hard to read. because of this I have created a second graph below which only includes journeys over an hour. 
+```{r}
+round_to_nearest_10 <- function(x) {
+  round(x / 10) * 10
+}
+cyclistic_data_2023_ride_length_rounded <- cyclistic_data_2023_clean %>%
+  mutate(ride_length_rounded = round_to_nearest_10(ride_length))
+
+cyclistic_data_2023_ride_length_table <- cyclistic_data_2023_ride_length_rounded %>%
+  group_by(ride_length_rounded, member_casual) %>%
+  summarize(count = n())
+
+head(cyclistic_data_2023_ride_length_table)
+
+cyclistic_data_2023_ride_length_table <- cyclistic_data_2023_ride_length_table %>%
+  filter(ride_length_rounded < 300)
+
+cyclistic_data_2023_ride_length_table <- cyclistic_data_2023_ride_length_table %>%
+  filter(ride_length_rounded > 60)
+
+ggplot(data = cyclistic_data_2023_ride_length_table) + 
+  geom_col(mapping = aes(x = ride_length_rounded, y = count, fill = member_casual)) +
+  labs(
+    title = "Counts of Members and Casual Riders by Start Station",
+    x = "date",
+    y = "journey time",
+    colour = "Member/Casual"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10)
+  )
+
+```
+when looking at these two graphs together w get a clear picture that casual riders are more likely to take a longer journey, this would again suggest that casual riders aren't using the bikes primarily as a mode of transport. this may also explain why casual members were more likely to use electric bikes when compared with members as they feel more necessary for these longer journeys. 
+
+# conclusion
+
+in conclusion i feel that the data is telling us that casual riders have a preference for using the bikes primarily for recreational purposes, whilst we also have data suggesting that members are more likely to use the bikes for transportation, with evidence to suggest that they are using the bikes to commute to work.
+
+Here is a final visualisation which i feel displays this particularly well. 
+
+```{r}
+table_for_cyclystic_radar <- data.frame(
+  likelihood_to_ride_at_weekend = c(40, 20, 24.08541, 36.24878),
+  likelihood_to_ride_on_weekday = c(80, 60, 75.91459, 63.75122),
+  likelihood_to_ride_during_summer = c(50, 30, 35.92805, 45.82951),
+  likelihood_to_ride_6am_9am = c(30, 10, 19.3699, 10.87111),
+  journey_under_30_minutes = c(100, 80, 96.39075, 79.58624),
+  journey_over_1_hour = c(20, 0, 0.604647, 4.847663)
+)
+
+rownames(table_for_cyclystic_radar) = c("max", "min", "member", "casual")
+
+ggplot2_colors <- scales::hue_pal()(2)
+colors_border <- ggplot2_colors
+colors_in <- sapply(ggplot2_colors, scales::alpha, 0.25)
+
+
+radarchart(table_for_cyclystic_radar,
+           axistype = 1,
+           pcol = colors_border, 
+           pfcol = colors_in, 
+           plwd = 2, 
+           plty = 1, 
+           cglcol = "grey", 
+           cglty = 1, 
+           axislabcol = "grey",
+           caxislabels = seq(0, 100),
+           vlcex = 0.8)
+
+```
+When looking at the above visualisation i believe we get the clearest image of what the key differences are between members and casuals. with each rung only representing 5% we can see that these differences are significant but not everything and there are some clear overlaps between how members and casuals use cyclistic. However from what the data is telling me here are my recommendations. I believe there are two main roads to increase the number of cyclistic members. firstly i would target casual riders who have similar usage to current members and try to convince them to sign up to cyclistic as members. secondly i would create a new membership plan structured to the more recreational tendencies of casual riders, i believe this could convince many more people to join as members by tapping into a new market and demographic. 
+
+
+
+
+
+
+
+
+
+
+
